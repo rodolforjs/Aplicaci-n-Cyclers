@@ -1,0 +1,42 @@
+name: estilos
+description: "A new Flutter project."
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  cloud_firestore: ^7.0.0
+  file_picker: ^10.3.10
+  firebase_auth: ^7.0.1
+  firebase_core: ^5.0.0
+  flutter:
+    sdk: flutter
+  google_maps_flutter: ^2.18.1
+  google_sign_in: ^7.2.0
+  image_picker: ^1.2.4
+  path_provider: ^2.1.6
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
+  fonts:
+    - family: DM Mono
+      fonts:
+        - asset: assets/fonts/DMMono-Medium.ttf
+          weight: 600
+        - asset: assets/fonts/DMMono-Regular.ttf
+          weight: 500
+        - asset: assets/fonts/DMMono-Light.ttf
+          weight: 500
+    - family: DM Sans
+      fonts:
+        - asset: assets/fonts/DMSans-VariableFont_opsz,wght.ttf
+          weight: 500

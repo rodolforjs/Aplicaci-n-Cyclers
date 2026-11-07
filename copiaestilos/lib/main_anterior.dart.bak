@@ -1,0 +1,120 @@
+import 'package:flutter/material.dart';
+import 'theme/theme.dart';
+import 'views/map_home.dart';
+
+import 'package:firebase_core/firebase_core.dart';
+import 'firebase_options.dart';
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  runApp(const MainApp());
+}
+
+class MainApp extends StatelessWidget {
+  const MainApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: appTheme,
+      home: const HomeScreen(),
+    );
+  }
+}
+
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  // 0 inicio, 1 mapa, 2 social, 3 perfil
+  int _selectedIndex = 1;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      // contenido: cada pestaña es una vista de /views
+      body: IndexedStack(
+        index: _selectedIndex,
+
+        children: const [
+          _Pending(label: 'Inicio'),
+          MapHomeView(),
+          _Pending(label: 'Social'),
+          _Pending(label: 'Perfil'),
+        ],
+      ),
+
+      // botón principal (navegación)
+      floatingActionButton: FloatingActionButton(
+        // pendiente: definir a qué flujo lleva este botón
+        onPressed: () {},
+        child: const Icon(Icons.navigation),
+      ),
+
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+
+      // bottom navigation bar
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _selectedIndex,
+
+        onDestinationSelected: (index) {
+          setState(() {
+            _selectedIndex = index;
+          });
+        },
+
+        destinations: const [
+          // inicio
+          NavigationDestination(
+            icon: Icon(Icons.home_outlined),
+            selectedIcon: Icon(Icons.home),
+            label: 'Inicio',
+          ),
+
+          // mapa
+          NavigationDestination(
+            icon: Icon(Icons.map_outlined),
+            selectedIcon: Icon(Icons.map),
+            label: 'Mapa',
+          ),
+
+          // social
+          NavigationDestination(
+            icon: Icon(Icons.groups_outlined),
+            selectedIcon: Icon(Icons.groups),
+            label: 'Social',
+          ),
+
+          // perfil
+          NavigationDestination(
+            icon: Icon(Icons.account_circle_outlined),
+            selectedIcon: Icon(Icons.account_circle),
+            label: 'Perfil',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// pestañas que todavía no se construyen
+class _Pending extends StatelessWidget {
+  const _Pending({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+
+    return Center(child: Text(label, style: text.headlineMedium));
+  }
+}

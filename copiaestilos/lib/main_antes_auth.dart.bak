@@ -1,0 +1,652 @@
+import 'dart:math' as math;
+import 'dart:ui' as ui;
+
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/material.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+
+import 'firebase_options.dart';
+import 'theme/theme.dart';
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  runApp(const MainApp());
+}
+
+class MainApp extends StatelessWidget {
+  const MainApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: appTheme,
+      home: const HomeScreen(),
+    );
+  }
+}
+
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  // 0 inicio, 1 mapa, 2 social, 3 perfil
+  int _selectedIndex = 1;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      // contenido: cada pestaña es una vista de /views
+      body: IndexedStack(
+        index: _selectedIndex,
+
+        children: const [
+          _Pending(label: 'Inicio'),
+          RutasScreen(),
+          _Pending(label: 'Social'),
+          _Pending(label: 'Perfil'),
+        ],
+      ),
+
+      // botón principal (navegación)
+      floatingActionButton: FloatingActionButton(
+        heroTag: 'navegacion',
+        // pendiente: definir a qué flujo lleva este botón
+        onPressed: () {},
+        child: const Icon(Icons.navigation),
+      ),
+
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+
+      // bottom navigation bar
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _selectedIndex,
+
+        onDestinationSelected: (index) {
+          setState(() {
+            _selectedIndex = index;
+          });
+        },
+
+        destinations: const [
+          // inicio
+          NavigationDestination(
+            icon: Icon(Icons.home_outlined),
+            selectedIcon: Icon(Icons.home),
+            label: 'Inicio',
+          ),
+
+          // mapa
+          NavigationDestination(
+            icon: Icon(Icons.map_outlined),
+            selectedIcon: Icon(Icons.map),
+            label: 'Mapa',
+          ),
+
+          // social
+          NavigationDestination(
+            icon: Icon(Icons.groups_outlined),
+            selectedIcon: Icon(Icons.groups),
+            label: 'Social',
+          ),
+
+          // perfil
+          NavigationDestination(
+            icon: Icon(Icons.account_circle_outlined),
+            selectedIcon: Icon(Icons.account_circle),
+            label: 'Perfil',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// pestañas que todavía no se construyen
+class _Pending extends StatelessWidget {
+  const _Pending({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+
+    return Center(child: Text(label, style: text.headlineMedium));
+  }
+}
+
+class RutasScreen extends StatefulWidget {
+  const RutasScreen({super.key});
+
+  @override
+  State<RutasScreen> createState() => _RutasScreenState();
+}
+
+class _RutasScreenState extends State<RutasScreen> {
+  final _rutas = FirebaseFirestore.instance.collection('rutas');
+  final _mapKey = GlobalKey<_MapaRutasState>();
+  late final Stream<QuerySnapshot<Map<String, dynamic>>> _rutasStream;
+  late final Stream<QuerySnapshot<Map<String, dynamic>>> _ultimasRutasStream;
+  LatLng? _posicionSeleccionada;
+  BitmapDescriptor? _iconoLandscape;
+  static const double _panelMin = 0.14;
+  final _panelController = DraggableScrollableController();
+  final _extentPanel = ValueNotifier<double>(_panelMin);
+
+  @override
+  void initState() {
+    super.initState();
+    _crearIconoLandscape();
+    _rutasStream = _rutas.snapshots();
+    _ultimasRutasStream = _rutas
+        .orderBy('creadoEn', descending: true)
+        .limit(10)
+        .snapshots();
+  }
+
+  @override
+  void dispose() {
+    _extentPanel.dispose();
+    _panelController.dispose();
+    super.dispose();
+  }
+
+  // Crear un marcador con el icono landscape de Material.
+  Future<void> _crearIconoLandscape() async {
+    const double lado = 112;
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    final centro = const Offset(lado / 2, lado / 2);
+
+    canvas.drawCircle(centro, 48, Paint()..color = AppColors.brand500);
+
+    final texto = TextPainter(
+      text: TextSpan(
+        text: String.fromCharCode(Icons.landscape.codePoint),
+        style: TextStyle(
+          fontSize: 62,
+          fontFamily: Icons.landscape.fontFamily,
+          package: Icons.landscape.fontPackage,
+          color: AppColors.neutral0,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+
+    texto.paint(
+      canvas,
+      Offset((lado - texto.width) / 2, (lado - texto.height) / 2),
+    );
+
+    final imagen = await recorder.endRecording().toImage(112, 112);
+    final datos = await imagen.toByteData(format: ui.ImageByteFormat.png);
+    imagen.dispose();
+    if (datos == null || !mounted) return;
+
+    setState(() {
+      _iconoLandscape = BitmapDescriptor.bytes(
+        datos.buffer.asUint8List(),
+        imagePixelRatio: 2,
+      );
+    });
+  }
+
+  Future<void> _agregarRuta() async {
+    final posicion = _posicionSeleccionada;
+    if (posicion == null) return;
+    final tituloController = TextEditingController();
+    final descripcionController = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    bool guardando = false;
+    bool guardadoCorrectamente = false;
+
+    try {
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        showDragHandle: true,
+        builder: (sheetContext) {
+          return StatefulBuilder(
+            builder: (sheetContext, setSheetState) {
+              Future<void> guardar() async {
+                if (guardando || !formKey.currentState!.validate()) return;
+                setSheetState(() => guardando = true);
+
+                try {
+                  await _rutas.add({
+                    'titulo': tituloController.text.trim(),
+                    'descripcion': descripcionController.text.trim(),
+                    'latitud': posicion.latitude,
+                    'longitud': posicion.longitude,
+                    'creadoEn': FieldValue.serverTimestamp(),
+                  });
+                  guardadoCorrectamente = true;
+                  if (sheetContext.mounted) {
+                    Navigator.of(sheetContext).pop();
+                  }
+                } catch (e) {
+                  debugPrint('Error guardando ruta: $e');
+                  if (!sheetContext.mounted) return;
+                  ScaffoldMessenger.of(sheetContext).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'No se pudo guardar la ruta. Inténtalo otra vez.',
+                      ),
+                      behavior: SnackBarBehavior.fixed,
+                    ),
+                  );
+                  setSheetState(() => guardando = false);
+                }
+              }
+
+              return Padding(
+                padding: EdgeInsets.fromLTRB(
+                  AppSpacing.space400,
+                  AppSpacing.space200,
+                  AppSpacing.space400,
+                  MediaQuery.viewInsetsOf(sheetContext).bottom +
+                      AppSpacing.space600,
+                ),
+                child: SingleChildScrollView(
+                  child: Form(
+                    key: formKey,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Nueva ruta',
+                          style: Theme.of(sheetContext).textTheme.titleLarge,
+                        ),
+                        const SizedBox(height: AppSpacing.space400),
+                        TextFormField(
+                          controller: tituloController,
+                          autofocus: true,
+                          enabled: !guardando,
+                          textCapitalization: TextCapitalization.sentences,
+                          decoration: const InputDecoration(
+                            labelText: 'Título',
+                            border: OutlineInputBorder(),
+                          ),
+                          validator: (value) =>
+                              value == null || value.trim().isEmpty
+                              ? 'Ingresa un título'
+                              : null,
+                        ),
+                        const SizedBox(height: AppSpacing.space400),
+                        TextFormField(
+                          controller: descripcionController,
+                          enabled: !guardando,
+                          textCapitalization: TextCapitalization.sentences,
+                          maxLines: 3,
+                          decoration: const InputDecoration(
+                            labelText: 'Descripción',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                        const SizedBox(height: AppSpacing.space600),
+                        SizedBox(
+                          width: double.infinity,
+                          child: FilledButton(
+                            onPressed: guardando ? null : guardar,
+                            child: guardando
+                                ? const SizedBox(
+                                    height: 20,
+                                    width: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Text('Guardar ruta'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      );
+
+      if (guardadoCorrectamente && mounted) {
+        setState(() => _posicionSeleccionada = null);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Ruta guardada correctamente'),
+            behavior: SnackBarBehavior.fixed,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+    } finally {
+      tituloController.dispose();
+      descripcionController.dispose();
+    }
+  }
+
+  void _irARuta(Map<String, dynamic> ruta) {
+    final latitud = (ruta['latitud'] as num?)?.toDouble();
+    final longitud = (ruta['longitud'] as num?)?.toDouble();
+    if (latitud == null || longitud == null) return;
+    _mapKey.currentState?.irA(LatLng(latitud, longitud));
+    if (_panelController.isAttached) {
+      _panelController.animateTo(
+        _panelMin,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    final colors = Theme.of(context).colorScheme;
+    final alto = MediaQuery.sizeOf(context).height;
+
+    return Stack(
+      children: [
+        // mapa a pantalla completa
+        Positioned.fill(
+          child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: _rutasStream,
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                debugPrint('Error leyendo rutas: ${snapshot.error}');
+              }
+              final marcadores = <Marker>{};
+              if (snapshot.hasData) {
+                for (final doc in snapshot.data!.docs) {
+                  final ruta = doc.data();
+                  final lat = (ruta['latitud'] as num?)?.toDouble();
+                  final lng = (ruta['longitud'] as num?)?.toDouble();
+                  if (lat == null || lng == null) continue;
+                  marcadores.add(
+                    Marker(
+                      markerId: MarkerId(doc.id),
+                      icon: _iconoLandscape ?? BitmapDescriptor.defaultMarker,
+                      position: LatLng(lat, lng),
+                      infoWindow: InfoWindow(
+                        title: ruta['titulo'] as String? ?? '',
+                        snippet: ruta['descripcion'] as String? ?? '',
+                      ),
+                    ),
+                  );
+                }
+              }
+              return _MapaRutas(
+                key: _mapKey,
+                marcadores: marcadores,
+                iconoLandscape: _iconoLandscape,
+                posicionSeleccionada: _posicionSeleccionada,
+                onSeleccionar: (posicion) {
+                  setState(() => _posicionSeleccionada = posicion);
+                },
+              );
+            },
+          ),
+        ),
+
+        // instrucción sobre el mapa
+        SafeArea(
+          child: Align(
+            alignment: Alignment.topCenter,
+            child: Padding(
+              padding: const EdgeInsets.all(AppSpacing.space400),
+              child: Material(
+                color: colors.surface,
+                elevation: 2,
+                borderRadius: BorderRadius.circular(AppRadius.md),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppPadding.md,
+                    vertical: AppPadding.sm,
+                  ),
+                  child: Text(
+                    _posicionSeleccionada == null
+                        ? 'Toca dos veces o mantén presionado el mapa para elegir un punto.'
+                        : 'Punto seleccionado. Presiona + para guardar la ruta.',
+                    style: text.bodySmall,
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+
+        // lista de rutas en un panel que se arrastra hacia arriba
+        NotificationListener<DraggableScrollableNotification>(
+          onNotification: (n) {
+            _extentPanel.value = n.extent;
+            return false;
+          },
+          child: DraggableScrollableSheet(
+            controller: _panelController,
+            initialChildSize: _panelMin,
+            minChildSize: _panelMin,
+            maxChildSize: 0.85,
+            snap: true,
+            builder: (context, scrollController) {
+              return Material(
+                color: colors.surface,
+                elevation: 3,
+                clipBehavior: Clip.antiAlias,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(AppRadius.xl),
+                ),
+                child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  stream: _ultimasRutasStream,
+                  builder: (context, snapshot) {
+                    if (snapshot.hasError) {
+                      debugPrint(
+                        'Error leyendo últimas rutas: ${snapshot.error}',
+                      );
+                    }
+                    final documentos = snapshot.data?.docs ?? [];
+
+                    return ListView(
+                      controller: scrollController,
+                      padding: const EdgeInsets.fromLTRB(
+                        AppSpacing.space400,
+                        AppSpacing.space200,
+                        AppSpacing.space400,
+                        AppSpacing.space1100,
+                      ),
+                      children: [
+                        // manija
+                        Center(
+                          child: Container(
+                            width: 32,
+                            height: 4,
+                            decoration: BoxDecoration(
+                              color: AppColors.neutral300,
+                              borderRadius: BorderRadius.circular(
+                                AppRadius.full,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: AppSpacing.space200),
+                        Text('Últimas rutas', style: text.titleLarge),
+                        const SizedBox(height: AppSpacing.space200),
+                        if (snapshot.hasError)
+                          const Text('No se pudieron cargar las rutas.')
+                        else if (!snapshot.hasData)
+                          const Center(child: CircularProgressIndicator())
+                        else if (documentos.isEmpty)
+                          const Text('Todavía no hay rutas guardadas.')
+                        else
+                          ...documentos.map((doc) {
+                            final ruta = doc.data();
+                            final titulo =
+                                ruta['titulo'] as String? ?? 'Sin título';
+                            final descripcion =
+                                ruta['descripcion'] as String? ?? '';
+                            return Card(
+                              child: ListTile(
+                                leading: CircleAvatar(
+                                  backgroundColor: colors.primaryContainer,
+                                  child: Icon(
+                                    Icons.hiking,
+                                    color: colors.onPrimaryContainer,
+                                  ),
+                                ),
+                                title: Text(titulo),
+                                subtitle: descripcion.isEmpty
+                                    ? null
+                                    : Text(
+                                        descripcion,
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                trailing: const Icon(Icons.chevron_right),
+                                onTap: () => _irARuta(ruta),
+                              ),
+                            );
+                          }),
+                      ],
+                    );
+                  },
+                ),
+              );
+            },
+          ),
+        ),
+
+        // botón agregar ruta: sigue al panel para no taparse
+        ValueListenableBuilder<double>(
+          valueListenable: _extentPanel,
+          builder: (context, extent, _) {
+            final sinPunto = _posicionSeleccionada == null;
+            return Positioned(
+              right: AppSpacing.space400,
+              bottom: math.min(extent, 0.45) * alto + AppSpacing.space400,
+              child: FloatingActionButton(
+                heroTag: 'agregar_ruta',
+                onPressed: sinPunto ? null : _agregarRuta,
+                tooltip: 'Agregar ruta',
+                // gris mientras no haya un punto elegido en el mapa
+                backgroundColor: sinPunto ? AppColors.neutral100 : null,
+                foregroundColor: sinPunto ? AppColors.neutral400 : null,
+                elevation: sinPunto ? 0 : null,
+                child: const Icon(Icons.add_location_alt_outlined),
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _MapaRutas extends StatefulWidget {
+  const _MapaRutas({
+    super.key,
+    required this.marcadores,
+    required this.iconoLandscape,
+    required this.posicionSeleccionada,
+    required this.onSeleccionar,
+  });
+
+  final Set<Marker> marcadores;
+  final BitmapDescriptor? iconoLandscape;
+  final LatLng? posicionSeleccionada;
+  final ValueChanged<LatLng> onSeleccionar;
+
+  @override
+  State<_MapaRutas> createState() => _MapaRutasState();
+}
+
+class _MapaRutasState extends State<_MapaRutas> {
+  static const String _estiloMapaOscuro = r'''
+[
+  {"elementType":"geometry","stylers":[{"color":"#171721"}]},
+  {"elementType":"labels.text.fill","stylers":[{"color":"#a5a4b8"}]},
+  {"elementType":"labels.text.stroke","stylers":[{"color":"#171721"}]},
+  {"featureType":"administrative","elementType":"geometry.stroke","stylers":[{"color":"#393647"}]},
+  {"featureType":"poi","stylers":[{"visibility":"off"}]},
+  {"featureType":"road","elementType":"geometry","stylers":[{"color":"#32303f"}]},
+  {"featureType":"road","elementType":"geometry.stroke","stylers":[{"color":"#242330"}]},
+  {"featureType":"road.highway","elementType":"geometry","stylers":[{"color":"#57516b"}]},
+  {"featureType":"transit","stylers":[{"visibility":"off"}]},
+  {"featureType":"water","elementType":"geometry","stylers":[{"color":"#101522"}]},
+  {"featureType":"landscape.natural","elementType":"geometry","stylers":[{"color":"#222531"}]},
+  {"featureType":"landscape.natural.terrain","elementType":"geometry","stylers":[{"color":"#303342"}]}
+]
+''';
+  GoogleMapController? _controller;
+  DateTime? _ultimoToque;
+  LatLng? _posicionPrimerToque;
+  double _zoom = 11;
+
+  void _detectarDobleToque(LatLng posicion) {
+    final ahora = DateTime.now();
+    // tolerancia de ~40 px, convertida a grados según el zoom actual
+    final tolerancia = 40 * 360 / (256 * math.pow(2, _zoom));
+    final dobleToque =
+        _ultimoToque != null &&
+        ahora.difference(_ultimoToque!).inMilliseconds < 500 &&
+        _posicionPrimerToque != null &&
+        (posicion.latitude - _posicionPrimerToque!.latitude).abs() <
+            tolerancia &&
+        (posicion.longitude - _posicionPrimerToque!.longitude).abs() <
+            tolerancia;
+    if (dobleToque) {
+      widget.onSeleccionar(posicion);
+      _ultimoToque = null;
+      _posicionPrimerToque = null;
+    } else {
+      _ultimoToque = ahora;
+      _posicionPrimerToque = posicion;
+    }
+  }
+
+  Future<void> irA(LatLng posicion) async {
+    await _controller?.animateCamera(CameraUpdate.newLatLngZoom(posicion, 15));
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GoogleMap(
+      initialCameraPosition: const CameraPosition(
+        target: LatLng(-33.4489, -70.6693),
+        zoom: 11,
+      ),
+      mapType: MapType.normal,
+      style: _estiloMapaOscuro,
+      markers: {
+        ...widget.marcadores,
+        if (widget.posicionSeleccionada != null)
+          Marker(
+            markerId: const MarkerId('ubicacion_temporal'),
+            position: widget.posicionSeleccionada!,
+            icon: widget.iconoLandscape ?? BitmapDescriptor.defaultMarker,
+            infoWindow: const InfoWindow(title: 'Ubicación seleccionada'),
+          ),
+      },
+      onMapCreated: (controller) => _controller = controller,
+      onTap: _detectarDobleToque,
+      onLongPress: widget.onSeleccionar,
+      zoomControlsEnabled: false,
+      onCameraMove: (camara) => _zoom = camara.zoom,
+      myLocationButtonEnabled: false,
+      myLocationEnabled: false,
+    );
+  }
+}

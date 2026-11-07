@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "1066223311333",
+    "project_id": "cyclers26pm",
+    "storage_bucket": "cyclers26pm.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1066223311333:android:397c4f2dd262da1d17f70c",
+        "android_client_info": {
+          "package_name": "com.example.estilos"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1066223311333-q9kpek2b0j4f9fmj0qk990t08kbfn7k7.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.estilos",
+            "certificate_hash": "66d799e21548ed2780edc1b1121c44890f449a4b"
+          }
+        },
+        {
+          "client_id": "1066223311333-pcuesfpger3bukftp6paq2th253e4j3e.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDlZW-lSJvEIwCX6sKVlHwJ6tftMjf9ZVI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1066223311333-pcuesfpger3bukftp6paq2th253e4j3e.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "1066223311333-h6o6apqmcmtmsgdplc0o7bjqidd1qsan.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.estilos"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
