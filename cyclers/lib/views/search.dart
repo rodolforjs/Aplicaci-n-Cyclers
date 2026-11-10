@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import '../services/fotos_limite.dart';
 import '../services/places_service.dart';
+import '../theme/app_icons.dart';
 import '../theme/theme.dart';
 import 'filters_sheet.dart';
 import 'place_tile.dart';
@@ -27,13 +28,10 @@ class _SearchViewState extends State<SearchView> {
 
   final _busquedaController = TextEditingController();
   final _places = PlacesService();
-  // Firestore no repite el último dato a quien se suscribe tarde: se guarda aquí
-  final _controlador =
-      StreamController<QuerySnapshot<Map<String, dynamic>>>.broadcast();
+  // guardados de Firestore: quedan en el estado al llegar
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _suscripcion;
   QuerySnapshot<Map<String, dynamic>>? _rutasSnapshot;
-  late final Stream<QuerySnapshot<Map<String, dynamic>>> _rutasStream =
-      _controlador.stream;
+  bool _errorRutas = false;
 
   String _busqueda = '';
   Timer? _espera;
@@ -51,12 +49,11 @@ class _SearchViewState extends State<SearchView> {
         .snapshots()
         .listen(
           (datos) {
-            _rutasSnapshot = datos;
-            _controlador.add(datos);
+            if (mounted) setState(() => _rutasSnapshot = datos);
           },
           onError: (Object error) {
             debugPrint('Error leyendo rutas: $error');
-            if (_controlador.hasListener) _controlador.addError(error);
+            if (mounted) setState(() => _errorRutas = true);
           },
         );
   }
@@ -64,7 +61,6 @@ class _SearchViewState extends State<SearchView> {
   @override
   void dispose() {
     _suscripcion?.cancel();
-    _controlador.close();
     _espera?.cancel();
     _busquedaController.dispose();
     super.dispose();
@@ -137,7 +133,8 @@ class _SearchViewState extends State<SearchView> {
     final dificultad = ruta['dificultad'] as String?;
 
     return PlaceTile(
-      icon: Icons.hiking,
+      // lugar o ruta guardados: verde, con el mismo ícono que en el mapa
+      icon: AppIcons.deTipo(ruta['tipo'] as String?),
       iconColor: colors.primary,
       iconBackground: colors.primaryContainer,
       title: ruta['titulo'] as String? ?? 'Sin título',
@@ -157,25 +154,24 @@ class _SearchViewState extends State<SearchView> {
     );
   }
 
-  // rutas que coinciden con lo escrito
+  // estado de carga común a las dos listas de guardados (o null si hay datos)
+  Widget? _estadoGuardados() {
+    if (_errorRutas) return const Text('No se pudieron cargar tus guardados.');
+    if (_rutasSnapshot == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    return null;
+  }
+
+  // guardados que coinciden con lo escrito
   Widget _rutasEncontradas() {
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      initialData: _rutasSnapshot,
-      stream: _rutasStream,
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return const Text('No se pudieron cargar las rutas.');
-        }
-        if (!snapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
-        }
+    final estado = _estadoGuardados();
+    if (estado != null) return estado;
 
-        final docs = filtrarRutas(snapshot.data!.docs, busqueda: _busqueda);
-        if (docs.isEmpty) return const Text('No se encontraron rutas.');
+    final docs = filtrarRutas(_rutasSnapshot!.docs, busqueda: _busqueda);
+    if (docs.isEmpty) return const Text('No hay guardados con ese nombre.');
 
-        return Column(children: docs.map((doc) => _filaRuta(doc)).toList());
-      },
-    );
+    return Column(children: docs.map(_filaRuta).toList());
   }
 
   // lugares reales que sugiere Google
@@ -195,10 +191,11 @@ class _SearchViewState extends State<SearchView> {
 
     return Column(
       children: _lugares.map((lugar) {
+        // de Google, sin guardar: pin vacío y gris
         return PlaceTile(
-          icon: Icons.place_outlined,
-          iconColor: colors.tertiary,
-          iconBackground: colors.tertiaryContainer,
+          icon: AppIcons.lugarSinGuardar,
+          iconColor: colors.onSurfaceVariant,
+          iconBackground: colors.surfaceContainer,
           title: lugar.titulo,
           subtitle: lugar.detalle.isEmpty ? null : lugar.detalle,
           onTap: () => _abrirLugar(lugar),
@@ -207,25 +204,15 @@ class _SearchViewState extends State<SearchView> {
     );
   }
 
-  // sin texto: las últimas rutas guardadas
+  // sin texto: los últimos guardados
   Widget _rutasRecientes() {
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      initialData: _rutasSnapshot,
-      stream: _rutasStream,
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return const Text('No se pudieron cargar las rutas.');
-        }
-        if (!snapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
-        }
+    final estado = _estadoGuardados();
+    if (estado != null) return estado;
 
-        final docs = snapshot.data!.docs.take(3).toList();
-        if (docs.isEmpty) return const Text('Todavía no hay rutas guardadas.');
+    final docs = _rutasSnapshot!.docs.take(3).toList();
+    if (docs.isEmpty) return const Text('Todavía no guardas nada.');
 
-        return Column(children: docs.map((doc) => _filaRuta(doc)).toList());
-      },
-    );
+    return Column(children: docs.map(_filaRuta).toList());
   }
 
   @override
@@ -255,7 +242,7 @@ class _SearchViewState extends State<SearchView> {
             const SizedBox(height: AppGap.component),
 
             if (_busqueda.isNotEmpty) ...[
-              Text('Rutas', style: text.titleMedium),
+              Text('Guardados', style: text.titleMedium),
               const SizedBox(height: AppGap.related),
               _rutasEncontradas(),
 
@@ -265,7 +252,7 @@ class _SearchViewState extends State<SearchView> {
               const SizedBox(height: AppGap.related),
               _lugaresEncontrados(),
             ] else ...[
-              Text('Rutas recientes', style: text.titleMedium),
+              Text('Guardados recientes', style: text.titleMedium),
               const SizedBox(height: AppGap.related),
               _rutasRecientes(),
             ],

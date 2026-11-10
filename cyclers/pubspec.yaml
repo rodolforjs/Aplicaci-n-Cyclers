@@ -21,6 +21,7 @@ dependencies:
   pointer_interceptor: ^0.10.1
   image_picker: ^1.2.4
   path_provider: ^2.1.6
+  firebase_storage: ^14.0.1
 
 dev_dependencies:
   flutter_test:

@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../services/places_service.dart';
@@ -84,11 +84,29 @@ class _PreTripViewState extends State<PreTripView> {
     }
   }
 
+  // aquí ya hay un camino calculado: se guarda como RUTA, no como lugar
   Future<void> _guardar() async {
     final destino = widget.destino;
+    final ruta = _ruta;
+    final origen = _origen;
     final guardada = await mostrarGuardarRuta(
       context,
       destino.posicion,
+      tipo: kTipoRuta,
+      datosRuta: {
+        if (origen != null)
+          'origen': {
+            'latitud': origen.latitude,
+            'longitud': origen.longitude,
+          },
+        if (ruta != null) ...{
+          'metros': ruta.metros,
+          'segundos': ruta.duracion.inSeconds,
+          'puntos': ruta.puntos
+              .map((p) => GeoPoint(p.latitude, p.longitude))
+              .toList(),
+        },
+      },
       tituloInicial: destino.nombre,
       descripcionInicial: destino.direccion,
     );

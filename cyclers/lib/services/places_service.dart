@@ -56,14 +56,21 @@ class Lugar {
     if (latitud == null || longitud == null) return null;
 
     final dificultad = ruta['dificultad'] as String?;
+    // la primera foto subida por el usuario (si tiene) se muestra en la card
+    final fotos = ruta['fotos'] as List?;
     return Lugar(
       id: idDoc ?? 'ruta_${latitud}_$longitud',
       nombre: ruta['titulo'] as String? ?? 'Sin título',
       direccion: ruta['descripcion'] as String? ?? '',
-      tipo: dificultad == null ? 'Ruta' : 'Ruta · $dificultad',
+      tipo: [
+        ruta['tipo'] == 'ruta' ? 'Ruta' : 'Lugar',
+        if (ruta['bici'] is String) ruta['bici'] as String,
+        if (dificultad != null) dificultad,
+      ].join(' · '),
       posicion: LatLng(latitud, longitud),
       esRuta: true,
       idRuta: idDoc,
+      fotoUrl: fotos != null && fotos.isNotEmpty ? fotos.first as String : null,
     );
   }
 

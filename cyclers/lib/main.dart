@@ -13,6 +13,7 @@ import 'package:pointer_interceptor/pointer_interceptor.dart';
 
 import 'auth/auth_gate.dart';
 import 'firebase_options.dart';
+import 'theme/app_icons.dart';
 import 'theme/theme.dart';
 import 'views/filters_sheet.dart';
 import 'views/map_header.dart';
@@ -166,15 +167,17 @@ class _RutasScreenState extends State<RutasScreen> {
 
   final _mapKey = GlobalKey<_MapaRutasState>();
   final _places = PlacesService();
-  // Firestore no repite el último dato a quien se suscribe tarde (por ejemplo,
-  // el panel cuando vuelve a aparecer): se guarda aquí y se entrega como inicial
-  final _controlador =
-      StreamController<QuerySnapshot<Map<String, dynamic>>>.broadcast();
+  // guardados de Firestore: llegan por la suscripción y quedan en el estado.
+  // Lo filtrado y los marcadores se calculan UNA vez por cambio (_recalcular),
+  // no en cada build: así abrir una card o mover el panel no recorre todo.
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _suscripcion;
   QuerySnapshot<Map<String, dynamic>>? _rutasSnapshot;
-  late final Stream<QuerySnapshot<Map<String, dynamic>>> _rutasStream =
-      _controlador.stream;
+  bool _errorRutas = false;
+  List<QueryDocumentSnapshot<Map<String, dynamic>>> _filtradas = const [];
+  Set<Marker> _marcadores = const {};
   FiltrosRutas _filtros = const FiltrosRutas();
+  // marcadores del mapa: uno para lugares y otro para rutas
+  BitmapDescriptor? _iconoLugar;
   BitmapDescriptor? _iconoRuta;
 
   // lo que está elegido en el mapa: un punto, un lugar real o una ruta guardada
@@ -183,7 +186,6 @@ class _RutasScreenState extends State<RutasScreen> {
   @override
   void dispose() {
     _suscripcion?.cancel();
-    _controlador.close();
     _panelController.dispose();
     super.dispose();
   }
@@ -191,26 +193,74 @@ class _RutasScreenState extends State<RutasScreen> {
   @override
   void initState() {
     super.initState();
-    _crearIconoRuta();
+    _crearIconos();
     _suscripcion = FirebaseFirestore.instance
         .collection('rutas')
         .snapshots()
         .listen(
           (datos) {
+            if (!mounted) return;
             _rutasSnapshot = datos;
-            _controlador.add(datos);
+            _errorRutas = false;
+            _recalcular();
             _sincronizarSeleccion();
           },
           onError: (Object error) {
             debugPrint('Error leyendo rutas: $error');
-            if (_controlador.hasListener) _controlador.addError(error);
+            if (mounted) setState(() => _errorRutas = true);
           },
         );
   }
 
-  // marcador de ruta: círculo pequeño con borde blanco, como los íconos de
-  // lugares de Google (30 px lógicos, dibujado al triple para que se vea nítido)
-  Future<void> _crearIconoRuta() async {
+  // filtra y arma los marcadores; se llama cuando cambian los datos,
+  // los filtros o los íconos (nunca dentro de build)
+  void _recalcular() {
+    final filtradas = filtrarRutas(
+      _rutasSnapshot?.docs ?? const [],
+      filtros: _filtros,
+    );
+
+    final marcadores = <Marker>{};
+    for (final doc in filtradas) {
+      final ruta = doc.data();
+      final lat = (ruta['latitud'] as num?)?.toDouble();
+      final lng = (ruta['longitud'] as num?)?.toDouble();
+      if (lat == null || lng == null) continue;
+      marcadores.add(
+        Marker(
+          markerId: MarkerId(doc.id),
+          icon:
+              (ruta['tipo'] == 'ruta' ? _iconoRuta : _iconoLugar) ??
+              BitmapDescriptor.defaultMarker,
+          position: LatLng(lat, lng),
+          onTap: () => _seleccionarRuta(doc),
+        ),
+      );
+    }
+
+    setState(() {
+      _filtradas = filtradas;
+      _marcadores = marcadores;
+    });
+  }
+
+  void _cambiarFiltros(FiltrosRutas nuevos) {
+    _filtros = nuevos;
+    _recalcular();
+  }
+
+  Future<void> _crearIconos() async {
+    final lugar = await _crearIcono(AppIcons.lugar);
+    final ruta = await _crearIcono(AppIcons.ruta);
+    if (!mounted) return;
+    _iconoLugar = lugar;
+    _iconoRuta = ruta;
+    _recalcular();
+  }
+
+  // marcador: círculo pequeño con borde blanco, como los íconos de lugares
+  // de Google (30 px lógicos, dibujado al triple para que se vea nítido)
+  Future<BitmapDescriptor?> _crearIcono(IconData icono) async {
     const double lado = 90;
     const double escala = 3;
     final recorder = ui.PictureRecorder();
@@ -228,7 +278,6 @@ class _RutasScreenState extends State<RutasScreen> {
       Paint()..color = appColorScheme.primary,
     );
 
-    const icono = Icons.landscape;
     final texto = TextPainter(
       text: TextSpan(
         text: String.fromCharCode(icono.codePoint),
@@ -253,14 +302,12 @@ class _RutasScreenState extends State<RutasScreen> {
     );
     final datos = await imagen.toByteData(format: ui.ImageByteFormat.png);
     imagen.dispose();
-    if (datos == null || !mounted) return;
+    if (datos == null) return null;
 
-    setState(() {
-      _iconoRuta = BitmapDescriptor.bytes(
-        datos.buffer.asUint8List(),
-        imagePixelRatio: escala,
-      );
-    });
+    return BitmapDescriptor.bytes(
+      datos.buffer.asUint8List(),
+      imagePixelRatio: escala,
+    );
   }
 
   // cada toque en el mapa invalida lo que se estaba buscando antes
@@ -425,7 +472,7 @@ class _RutasScreenState extends State<RutasScreen> {
     setState(() => _seleccion = null);
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('Ruta guardada correctamente'),
+        content: Text('Lugar guardado correctamente'),
         behavior: SnackBarBehavior.fixed,
         duration: Duration(seconds: 3),
       ),
@@ -458,7 +505,13 @@ class _RutasScreenState extends State<RutasScreen> {
   // abre el panel de filtros y guarda lo que se elija
   Future<void> _abrirFiltros() async {
     final nuevos = await mostrarFiltros(context, _filtros);
-    if (nuevos != null && mounted) setState(() => _filtros = nuevos);
+    if (nuevos != null && mounted) _cambiarFiltros(nuevos);
+  }
+
+  // chip de la bici: elegir modo
+  Future<void> _abrirModo() async {
+    final nuevos = await mostrarModo(context, _filtros);
+    if (nuevos != null && mounted) _cambiarFiltros(nuevos);
   }
 
   // tocar la manija o el título abre o cierra el panel
@@ -474,7 +527,6 @@ class _RutasScreenState extends State<RutasScreen> {
 
   // panel con todas las rutas guardadas; tocar una lleva el mapa hasta ella
   Widget _panelRutas() {
-    final text = Theme.of(context).textTheme;
     final colors = Theme.of(context).colorScheme;
 
     return DraggableScrollableSheet(
@@ -492,128 +544,140 @@ class _RutasScreenState extends State<RutasScreen> {
             borderRadius: const BorderRadius.vertical(
               top: Radius.circular(AppRadius.xl),
             ),
-            child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-              initialData: _rutasSnapshot,
-              stream: _rutasStream,
-              builder: (context, snapshot) {
-                if (snapshot.hasError) {
-                  debugPrint(
-                    'Error leyendo rutas del panel: ${snapshot.error}',
-                  );
-                }
-                final rutas = filtrarRutas(
-                  snapshot.data?.docs ?? [],
-                  filtros: _filtros,
-                );
-                final titulo = _filtros.activo
-                    ? 'Rutas filtradas'
-                    : 'Rutas guardadas';
-
-                return ListView(
-                  controller: scrollController,
-                  padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.space400,
-                    AppSpacing.space200,
-                    AppSpacing.space400,
-                    AppSpacing.space400,
-                  ),
-                  children: [
-                    // manija y título: tocarlos abre o cierra el panel
-                    InkWell(
-                      onTap: _alternarPanel,
-                      child: Column(
-                        children: [
-                          Container(
-                            width: 32,
-                            height: 4,
-                            decoration: BoxDecoration(
-                              color: colors.surfaceContainerHighest,
-                              borderRadius: BorderRadius.circular(
-                                AppRadius.full,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: AppSpacing.space200),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  snapshot.hasData
-                                      ? '$titulo (${rutas.length})'
-                                      : titulo,
-                                  style: text.titleLarge,
-                                ),
-                              ),
-                              const Icon(Icons.unfold_more),
-                            ],
-                          ),
-                          const SizedBox(height: AppSpacing.space200),
-                        ],
-                      ),
-                    ),
-                    if (snapshot.hasError)
-                      const Text('No se pudieron cargar las rutas.')
-                    else if (!snapshot.hasData)
-                      const Center(child: CircularProgressIndicator())
-                    else if (rutas.isEmpty)
-                      Text(
-                        _filtros.activo
-                            ? 'No hay rutas con esos filtros.'
-                            : 'Todavía no hay rutas guardadas. Toca un lugar del mapa para guardar la primera.',
-                      )
-                    else
-                      ...rutas.map((doc) {
-                        final ruta = doc.data();
-                        final detalle = [
-                          ruta['dificultad'] as String? ?? '',
-                          ruta['descripcion'] as String? ?? '',
-                        ].where((parte) => parte.isNotEmpty).join(' · ');
-
-                        return Card(
-                          child: ListTile(
-                            // mismo ícono que el marcador del mapa
-                            leading: CircleAvatar(
-                              backgroundColor: colors.primary,
-                              foregroundColor: colors.onPrimary,
-                              child: const Icon(Icons.landscape),
-                            ),
-                            title: Text(
-                              ruta['titulo'] as String? ?? 'Sin título',
-                            ),
-                            subtitle: detalle.isEmpty
-                                ? null
-                                : Text(
-                                    detalle,
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                            // editar y eliminar
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                IconButton(
-                                  tooltip: 'Editar',
-                                  icon: const Icon(Icons.edit_outlined),
-                                  onPressed: () => editarRuta(context, doc),
-                                ),
-                                IconButton(
-                                  tooltip: 'Eliminar',
-                                  icon: const Icon(Icons.delete_outline),
-                                  onPressed: () => eliminarRuta(context, doc),
-                                ),
-                              ],
-                            ),
-                            onTap: () => _seleccionarRuta(doc),
-                          ),
-                        );
-                      }),
-                  ],
-                );
-              },
-            ),
+            child: _listaGuardados(scrollController),
           ),
         );
       },
+    );
+  }
+
+  // contenido del panel. ListView.builder solo construye las filas visibles.
+  Widget _listaGuardados(ScrollController scrollController) {
+    final text = Theme.of(context).textTheme;
+    final colors = Theme.of(context).colorScheme;
+    final rutas = _filtradas;
+    final cargando = _rutasSnapshot == null && !_errorRutas;
+    final titulo = _filtros.activo
+        ? 'Guardados filtrados'
+        : 'Lugares y rutas guardados';
+
+    // manija y título: tocarlos abre o cierra el panel
+    final encabezado = InkWell(
+      onTap: _alternarPanel,
+      borderRadius: BorderRadius.circular(AppRadius.md),
+      child: Column(
+        children: [
+          Container(
+            width: 32,
+            height: 4,
+            decoration: BoxDecoration(
+              color: colors.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(AppRadius.full),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.space200),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  cargando ? titulo : '$titulo (${rutas.length})',
+                  style: text.titleLarge,
+                ),
+              ),
+              const Icon(Icons.unfold_more),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.space200),
+        ],
+      ),
+    );
+
+    // sin filas: encabezado + mensaje
+    Widget? mensaje;
+    if (_errorRutas) {
+      mensaje = const Text('No se pudieron cargar tus guardados.');
+    } else if (cargando) {
+      mensaje = const Center(child: CircularProgressIndicator());
+    } else if (rutas.isEmpty) {
+      mensaje = _filtros.activo
+          ? Row(
+              children: [
+                const Expanded(child: Text('No hay guardados con esos filtros.')),
+                TextButton(
+                  onPressed: () => _cambiarFiltros(const FiltrosRutas()),
+                  child: const Text('Quitar filtros'),
+                ),
+              ],
+            )
+          : const Text(
+              'Todavía no guardas nada. Toca un lugar del mapa para guardar el primero.',
+            );
+    }
+
+    return ListView.builder(
+      controller: scrollController,
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.space400,
+        AppSpacing.space200,
+        AppSpacing.space400,
+        // deja libre la barra de navegación y el botón central
+        AppSpacing.space1100,
+      ),
+      itemCount: 1 + (mensaje != null ? 1 : rutas.length),
+      itemBuilder: (context, i) {
+        if (i == 0) return encabezado;
+        if (mensaje != null) return mensaje;
+        return _filaGuardado(rutas[i - 1]);
+      },
+    );
+  }
+
+  // una fila del panel: mismo ícono que su marcador; editar/eliminar en un menú
+  // (como el ListTile con PopupMenuButton de componentes del profe)
+  Widget _filaGuardado(QueryDocumentSnapshot<Map<String, dynamic>> doc) {
+    final colors = Theme.of(context).colorScheme;
+    final ruta = doc.data();
+    final detalle = [
+      ruta['bici'] as String? ?? '',
+      ruta['dificultad'] as String? ?? '',
+      ruta['descripcion'] as String? ?? '',
+    ].where((parte) => parte.isNotEmpty).join(' · ');
+
+    return Card(
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: colors.primary,
+          foregroundColor: colors.onPrimary,
+          child: Icon(AppIcons.deTipo(ruta['tipo'] as String?)),
+        ),
+        title: Text(ruta['titulo'] as String? ?? 'Sin título'),
+        subtitle: detalle.isEmpty
+            ? null
+            : Text(detalle, maxLines: 2, overflow: TextOverflow.ellipsis),
+        trailing: PopupMenuButton<String>(
+          tooltip: 'Opciones',
+          onSelected: (opcion) => opcion == 'editar'
+              ? editarRuta(context, doc)
+              : eliminarRuta(context, doc),
+          itemBuilder: (context) => const [
+            PopupMenuItem(
+              value: 'editar',
+              child: ListTile(
+                leading: Icon(AppIcons.editar),
+                title: Text('Editar'),
+              ),
+            ),
+            PopupMenuItem(
+              value: 'eliminar',
+              child: ListTile(
+                leading: Icon(AppIcons.eliminar),
+                title: Text('Eliminar'),
+              ),
+            ),
+          ],
+        ),
+        onTap: () => _seleccionarRuta(doc),
+      ),
     );
   }
 
@@ -625,44 +689,15 @@ class _RutasScreenState extends State<RutasScreen> {
       children: [
         // mapa a pantalla completa
         Positioned.fill(
-          child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-            initialData: _rutasSnapshot,
-            stream: _rutasStream,
-            builder: (context, snapshot) {
-              if (snapshot.hasError) {
-                debugPrint('Error leyendo rutas: ${snapshot.error}');
-              }
-              final marcadores = <Marker>{};
-              if (snapshot.hasData) {
-                for (final doc in filtrarRutas(
-                  snapshot.data!.docs,
-                  filtros: _filtros,
-                )) {
-                  final ruta = doc.data();
-                  final lat = (ruta['latitud'] as num?)?.toDouble();
-                  final lng = (ruta['longitud'] as num?)?.toDouble();
-                  if (lat == null || lng == null) continue;
-                  marcadores.add(
-                    Marker(
-                      markerId: MarkerId(doc.id),
-                      icon: _iconoRuta ?? BitmapDescriptor.defaultMarker,
-                      position: LatLng(lat, lng),
-                      onTap: () => _seleccionarRuta(doc),
-                    ),
-                  );
-                }
-              }
-              return _MapaRutas(
-                key: _mapKey,
-                marcadores: marcadores,
-                // el pin rojo solo para puntos y lugares; las rutas ya tienen su marcador
-                posicionSeleccionada: seleccion != null && !seleccion.esRuta
-                    ? seleccion.posicion
-                    : null,
-                onTocar: _seleccionarPunto,
-                onTocarIcono: _seleccionarIcono,
-              );
-            },
+          child: _MapaRutas(
+            key: _mapKey,
+            marcadores: _marcadores,
+            // el pin rojo solo para puntos y lugares; las rutas ya tienen su marcador
+            posicionSeleccionada: seleccion != null && !seleccion.esRuta
+                ? seleccion.posicion
+                : null,
+            onTocar: _seleccionarPunto,
+            onTocarIcono: _seleccionarIcono,
           ),
         ),
 
@@ -675,6 +710,8 @@ class _RutasScreenState extends State<RutasScreen> {
               MapHeader(
                 onSearch: _abrirBuscador,
                 onFilters: _abrirFiltros,
+                onModo: _abrirModo,
+                bici: _filtros.bici,
                 filtrosActivos: _filtros.cantidad,
               ),
             ],
@@ -698,9 +735,12 @@ class _RutasScreenState extends State<RutasScreen> {
               child: PlaceCard(
                 title: seleccion.nombre,
                 category: seleccion.tipo ?? 'Lugar',
-                categoryIcon: seleccion.esRuta
-                    ? Icons.landscape
-                    : Icons.place_outlined,
+                // guardado: pin o ruta; de Google / punto suelto: pin vacío
+                categoryIcon: !seleccion.esRuta
+                    ? AppIcons.lugarSinGuardar
+                    : (seleccion.tipo ?? '').startsWith('Ruta')
+                    ? AppIcons.ruta
+                    : AppIcons.lugar,
                 note: seleccion.direccion,
                 fotoUrl: seleccion.fotoUrl,
                 fotoAutor: seleccion.fotoAutor,

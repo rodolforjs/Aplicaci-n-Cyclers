@@ -2,18 +2,25 @@ import 'package:flutter/material.dart';
 import '../theme/theme.dart';
 import 'trip_metrics.dart';
 
-// panel inferior del viaje: registro (métricas) + tiempo y botón pausar
+// panel inferior del viaje: registro (métricas) + tiempo y botones.
+// Andando: "Pausar". Pausado: "Seguir" y "Terminar" (Figma: Ruta pausada).
 class RecordPanel extends StatelessWidget {
   const RecordPanel({
     super.key,
     required this.metrics,
     required this.time,
+    this.paused = false,
     this.onPause,
+    this.onResume,
+    this.onFinish,
   });
 
   final List<TripMetric> metrics;
   final String time;
+  final bool paused;
   final VoidCallback? onPause;
+  final VoidCallback? onResume;
+  final VoidCallback? onFinish;
 
   @override
   Widget build(BuildContext context) {
@@ -58,7 +65,7 @@ class RecordPanel extends StatelessWidget {
           ),
         ),
 
-        // tiempo + pausar
+        // tiempo + botones
         Container(
           color: colors.surface,
 
@@ -87,7 +94,27 @@ class RecordPanel extends StatelessWidget {
                     ],
                   ),
 
-                  FilledButton(onPressed: onPause, child: const Text('Pausar')),
+                  if (paused)
+                    Row(
+                      children: [
+                        FilledButton.tonal(
+                          onPressed: onResume,
+                          child: const Text('Seguir'),
+                        ),
+
+                        const SizedBox(width: AppGap.related),
+
+                        FilledButton(
+                          onPressed: onFinish,
+                          child: const Text('Terminar'),
+                        ),
+                      ],
+                    )
+                  else
+                    FilledButton(
+                      onPressed: onPause,
+                      child: const Text('Pausar'),
+                    ),
                 ],
               ),
             ),

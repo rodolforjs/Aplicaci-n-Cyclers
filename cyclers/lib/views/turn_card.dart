@@ -38,6 +38,8 @@ class TurnCard extends StatelessWidget {
             // distancia + calle
             Expanded(
               child: Column(
+                // solo el alto del texto: si no, la card se estira hasta abajo
+                mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
 
                 children: [

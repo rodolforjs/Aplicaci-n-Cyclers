@@ -1,21 +1,38 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:pointer_interceptor/pointer_interceptor.dart';
+import '../services/fotos_service.dart';
 import '../services/places_service.dart';
+import '../theme/app_icons.dart';
 import '../theme/theme.dart';
 import 'filters_sheet.dart';
+import 'fotos_picker.dart';
 
-// formulario para guardar una ruta en el punto indicado (Firestore).
-// Con idRuta edita esa ruta en vez de crear una nueva.
+// lo que se puede guardar desde este formulario (campo "tipo" en Firestore)
+const String kTipoLugar = 'lugar';
+const String kTipoRuta = 'ruta';
+
+// formulario para guardar en Firestore (colección "rutas"):
+//  - un LUGAR (tipo: 'lugar'): solo un punto del mapa. Se guarda desde la card
+//    de un lugar.
+//  - una RUTA (tipo: 'ruta'): el camino calculado hasta ese punto. Se guarda
+//    desde "Precomienzo Viaje"; en datosRuta llegan origen, distancia y puntos.
+// Los viajes ya hechos se guardan aparte, en "recorridos" (ver end_trip.dart).
+// Con idRuta edita ese documento en vez de crear uno nuevo.
 // Devuelve true si se guardó.
 Future<bool> mostrarGuardarRuta(
   BuildContext context,
   LatLng posicion, {
+  String tipo = kTipoLugar,
+  Map<String, dynamic> datosRuta = const {},
   String? idRuta,
   String tituloInicial = '',
   String descripcionInicial = '',
   String dificultadInicial = 'Media',
+  String? biciInicial,
+  List<String> fotosIniciales = const [],
 }) async {
   final guardada = await showModalBottomSheet<bool>(
     context: context,
@@ -26,10 +43,14 @@ Future<bool> mostrarGuardarRuta(
     builder: (sheetContext) => PointerInterceptor(
       child: _GuardarRutaSheet(
         posicion: posicion,
+        tipo: tipo,
+        datosRuta: datosRuta,
         idRuta: idRuta,
         tituloInicial: tituloInicial,
         descripcionInicial: descripcionInicial,
         dificultadInicial: dificultadInicial,
+        biciInicial: biciInicial,
+        fotosIniciales: fotosIniciales,
       ),
     ),
   );
@@ -49,27 +70,34 @@ Future<void> editarRuta(
   await mostrarGuardarRuta(
     context,
     lugar.posicion,
+    // los guardados antes de separar lugar y ruta no tienen tipo: son lugares
+    tipo: ruta['tipo'] as String? ?? kTipoLugar,
     idRuta: doc.id,
     tituloInicial: ruta['titulo'] as String? ?? '',
     descripcionInicial: ruta['descripcion'] as String? ?? '',
     dificultadInicial: ruta['dificultad'] as String? ?? 'Media',
+    biciInicial: ruta['bici'] as String?,
+    fotosIniciales: List<String>.from(ruta['fotos'] as List? ?? const []),
   );
 }
 
-// eliminar: pide confirmación y borra el documento de Firestore
+// eliminar: pide confirmación, borra el documento de Firestore y sus fotos
 Future<void> eliminarRuta(
   BuildContext context,
   QueryDocumentSnapshot<Map<String, dynamic>> doc,
 ) async {
   final mensajes = ScaffoldMessenger.of(context);
-  final titulo = doc.data()['titulo'] as String? ?? 'esta ruta';
+  final esRuta = doc.data()['tipo'] == kTipoRuta;
+  final nombre = esRuta ? 'ruta' : 'lugar';
+  final titulo =
+      doc.data()['titulo'] as String? ?? (esRuta ? 'esta ruta' : 'este lugar');
 
   final confirmar = await showDialog<bool>(
     context: context,
     // en web, evita que los toques del diálogo lleguen al mapa de abajo
     builder: (dialogContext) => PointerInterceptor(
       child: AlertDialog(
-        title: const Text('Eliminar ruta'),
+        title: Text('Eliminar $nombre'),
         content: Text('¿Eliminar "$titulo"? No se puede deshacer.'),
         actions: [
           TextButton(
@@ -87,12 +115,19 @@ Future<void> eliminarRuta(
   if (confirmar != true) return;
 
   try {
+    final archivos = List<String>.from(
+      doc.data()['fotosArchivos'] as List? ?? const [],
+    );
     await doc.reference.delete();
-    mensajes.showSnackBar(const SnackBar(content: Text('Ruta eliminada.')));
+    // las fotos se borran después: si esto falla, la ruta igual quedó eliminada
+    await FotosService.borrar(archivos);
+    mensajes.showSnackBar(
+      SnackBar(content: Text(esRuta ? 'Ruta eliminada.' : 'Lugar eliminado.')),
+    );
   } catch (e) {
     debugPrint('Error eliminando ruta: $e');
     mensajes.showSnackBar(
-      const SnackBar(content: Text('No se pudo eliminar la ruta.')),
+      SnackBar(content: Text('No se pudo eliminar el $nombre.')),
     );
   }
 }
@@ -100,18 +135,30 @@ Future<void> eliminarRuta(
 class _GuardarRutaSheet extends StatefulWidget {
   const _GuardarRutaSheet({
     required this.posicion,
+    required this.tipo,
+    required this.datosRuta,
     required this.idRuta,
     required this.tituloInicial,
     required this.descripcionInicial,
     required this.dificultadInicial,
+    required this.biciInicial,
+    required this.fotosIniciales,
   });
 
   final LatLng posicion;
+  // kTipoLugar o kTipoRuta
+  final String tipo;
+  // solo rutas nuevas: origen, metros, puntos...
+  final Map<String, dynamic> datosRuta;
   // null = ruta nueva; con id = editar esa ruta
   final String? idRuta;
   final String tituloInicial;
   final String descripcionInicial;
   final String dificultadInicial;
+  // solo rutas: para qué bici es (sirve para el filtro de modo)
+  final String? biciInicial;
+  // URLs de las fotos que ya tiene (al editar)
+  final List<String> fotosIniciales;
 
   @override
   State<_GuardarRutaSheet> createState() => _GuardarRutaSheetState();
@@ -126,8 +173,23 @@ class _GuardarRutaSheetState extends State<_GuardarRutaSheet> {
   final _formKey = GlobalKey<FormState>();
   bool _guardando = false;
   late String _dificultad = widget.dificultadInicial;
+  late String _bici = widget.biciInicial ?? kBicis.keys.first;
+  // fotos elegidas en este formulario (se suben al guardar)
+  final List<FotoNueva> _fotos = [];
 
   bool get _editando => widget.idRuta != null;
+  bool get _esRuta => widget.tipo == kTipoRuta;
+
+  // "Nuevo lugar", "Editar ruta"...
+  String get _tituloSheet {
+    if (_esRuta) return _editando ? 'Editar ruta' : 'Nueva ruta';
+    return _editando ? 'Editar lugar' : 'Nuevo lugar';
+  }
+
+  String get _textoBoton {
+    if (_editando) return 'Guardar cambios';
+    return _esRuta ? 'Guardar ruta' : 'Guardar lugar';
+  }
 
   @override
   void dispose() {
@@ -136,24 +198,63 @@ class _GuardarRutaSheetState extends State<_GuardarRutaSheet> {
     super.dispose();
   }
 
+  void _mensaje(String texto) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(texto), behavior: SnackBarBehavior.fixed),
+    );
+  }
+
+  Future<void> _agregarFotos() async {
+    final libres =
+        FotosService.maximo - widget.fotosIniciales.length - _fotos.length;
+    try {
+      final elegidas = await FotosService.elegir(cuantas: libres);
+      if (!mounted || elegidas.isEmpty) return;
+      setState(() => _fotos.addAll(elegidas));
+    } catch (e) {
+      debugPrint('Error eligiendo fotos: $e');
+      if (mounted) _mensaje('No se pudieron abrir las fotos.');
+    }
+  }
+
   Future<void> _guardar() async {
     if (_guardando || !_formKey.currentState!.validate()) return;
     setState(() => _guardando = true);
 
+    final rutas = FirebaseFirestore.instance.collection('rutas');
+    // el id se crea antes, así las fotos quedan en una carpeta con ese id
+    final doc = _editando ? rutas.doc(widget.idRuta) : rutas.doc();
+    var subidas = <FotoSubida>[];
+
     try {
-      final rutas = FirebaseFirestore.instance.collection('rutas');
+      subidas = await FotosService.subir(
+        _esRuta ? 'rutas' : 'lugares',
+        doc.id,
+        _fotos,
+      );
+
       final datos = {
         'titulo': _titulo.text.trim(),
         'descripcion': _descripcion.text.trim(),
         'dificultad': _dificultad,
+        if (_esRuta) 'bici': _bici,
+        // arrayUnion suma las nuevas sin borrar las que ya estaban
+        if (subidas.isNotEmpty) ...{
+          'fotos': FieldValue.arrayUnion(subidas.map((f) => f.url).toList()),
+          'fotosArchivos': FieldValue.arrayUnion(
+            subidas.map((f) => f.archivo).toList(),
+          ),
+        },
       };
 
       if (_editando) {
-        // editar: solo cambian los textos y la dificultad
-        await rutas.doc(widget.idRuta).update(datos);
+        await doc.update(datos);
       } else {
-        await rutas.add({
+        await doc.set({
           ...datos,
+          ...widget.datosRuta,
+          'tipo': widget.tipo,
+          'usuario': FirebaseAuth.instance.currentUser?.uid,
           'latitud': widget.posicion.latitude,
           'longitud': widget.posicion.longitude,
           'creadoEn': FieldValue.serverTimestamp(),
@@ -162,12 +263,12 @@ class _GuardarRutaSheetState extends State<_GuardarRutaSheet> {
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
       debugPrint('Error guardando ruta: $e');
+      // si las fotos subieron pero Firestore falló, no quedan fotos huérfanas
+      await FotosService.borrar(subidas.map((f) => f.archivo));
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No se pudo guardar la ruta. Inténtalo otra vez.'),
-          behavior: SnackBarBehavior.fixed,
-        ),
+      _mensaje(
+        'No se pudo guardar ${_esRuta ? 'la ruta' : 'el lugar'}. '
+        'Inténtalo otra vez.',
       );
       setState(() => _guardando = false);
     }
@@ -175,6 +276,7 @@ class _GuardarRutaSheetState extends State<_GuardarRutaSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     final text = Theme.of(context).textTheme;
 
     return Padding(
@@ -191,13 +293,18 @@ class _GuardarRutaSheetState extends State<_GuardarRutaSheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // título y cerrar
+              // ícono + título y cerrar
               Row(
                 children: [
-                  Expanded(child: Text(
-                      _editando ? 'Editar ruta' : 'Nueva ruta',
-                      style: text.titleLarge,
-                    )),
+                  CircleAvatar(
+                    backgroundColor: colors.primaryContainer,
+                    foregroundColor: colors.primary,
+                    child: Icon(_esRuta ? AppIcons.ruta : AppIcons.lugar),
+                  ),
+                  const SizedBox(width: AppSpacing.space300),
+                  Expanded(
+                    child: Text(_tituloSheet, style: text.titleLarge),
+                  ),
                   IconButton(
                     tooltip: 'Cerrar',
                     icon: const Icon(Icons.close),
@@ -240,6 +347,7 @@ class _GuardarRutaSheetState extends State<_GuardarRutaSheet> {
                 children: [
                   for (final d in kDificultades)
                     ChoiceChip(
+                      avatar: Icon(kIconosDificultad[d]),
                       label: Text(d),
                       selected: _dificultad == d,
                       onSelected: _guardando
@@ -247,6 +355,38 @@ class _GuardarRutaSheetState extends State<_GuardarRutaSheet> {
                           : (_) => setState(() => _dificultad = d),
                     ),
                 ],
+              ),
+              // una ruta es para un tipo de bici; un lugar sirve para todas
+              if (_esRuta) ...[
+                const SizedBox(height: AppSpacing.space400),
+                Text('Bici', style: text.titleMedium),
+                const SizedBox(height: AppSpacing.space200),
+                Wrap(
+                  spacing: AppSpacing.space200,
+                  runSpacing: AppSpacing.space200,
+                  children: [
+                    for (final bici in kBicis.entries)
+                      ChoiceChip(
+                        // naranjo = bici, en toda la app
+                        avatar: Icon(bici.value, color: colors.tertiary),
+                        label: Text(bici.key),
+                        selected: _bici == bici.key,
+                        onSelected: _guardando
+                            ? null
+                            : (_) => setState(() => _bici = bici.key),
+                      ),
+                  ],
+                ),
+              ],
+              const SizedBox(height: AppSpacing.space400),
+              Text('Fotos', style: text.titleMedium),
+              const SizedBox(height: AppSpacing.space200),
+              FotosPicker(
+                nuevas: _fotos,
+                guardadas: widget.fotosIniciales,
+                habilitado: !_guardando,
+                onAgregar: _agregarFotos,
+                onQuitar: (i) => setState(() => _fotos.removeAt(i)),
               ),
               const SizedBox(height: AppSpacing.space600),
               Row(
@@ -269,7 +409,7 @@ class _GuardarRutaSheetState extends State<_GuardarRutaSheet> {
                               width: 20,
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
-                          : Text(_editando ? 'Guardar cambios' : 'Guardar ruta'),
+                          : Text(_textoBoton),
                     ),
                   ),
                 ],

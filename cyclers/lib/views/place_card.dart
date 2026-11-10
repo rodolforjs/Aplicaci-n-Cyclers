@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:pointer_interceptor/pointer_interceptor.dart';
+import '../theme/app_icons.dart';
 import '../theme/theme.dart';
 
 // card de resultado: dos fotos, guardar/cerrar, datos del lugar y botón
@@ -9,7 +10,7 @@ class PlaceCard extends StatelessWidget {
     required this.title,
     required this.category,
     required this.note,
-    this.categoryIcon = Icons.landscape,
+    this.categoryIcon = AppIcons.lugarSinGuardar,
     this.photoLeft,
     this.photoRight,
     this.fotoUrl,
@@ -180,14 +181,14 @@ class PlaceCard extends StatelessWidget {
 
                     const SizedBox(height: AppGap.component),
 
-                    // guardar ruta (si se puede) y comenzar
+                    // guardar lugar (si se puede) y comenzar
                     Row(
                       children: [
                         if (onSaveRoute != null) ...[
                           Expanded(
                             child: OutlinedButton(
                               onPressed: onSaveRoute,
-                              child: const Text('Guardar ruta'),
+                              child: const Text('Guardar lugar'),
                             ),
                           ),
 

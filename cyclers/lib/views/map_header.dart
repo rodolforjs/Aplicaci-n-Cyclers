@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:pointer_interceptor/pointer_interceptor.dart';
+import '../theme/app_icons.dart';
 import '../theme/theme.dart';
 import 'map_chip.dart';
 import 'search_card.dart';
@@ -11,6 +12,8 @@ class MapHeader extends StatelessWidget {
     this.onSearch,
     this.onPlan,
     this.onFilters,
+    this.onModo,
+    this.bici,
     this.filtrosActivos = 0,
     this.mostrarChips = true,
   });
@@ -18,6 +21,10 @@ class MapHeader extends StatelessWidget {
   final VoidCallback? onSearch;
   final VoidCallback? onPlan;
   final VoidCallback? onFilters;
+  final VoidCallback? onModo;
+
+  // modo elegido (tipo de bici); null = todas
+  final String? bici;
 
   // cantidad de filtros aplicados (0 = ninguno)
   final int filtrosActivos;
@@ -54,17 +61,19 @@ class MapHeader extends StatelessWidget {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    // modo: con una bici elegida muestra su nombre
                     MapChip(
-                      icon: Icons.directions_bike,
+                      icon: kBicis[bici] ?? AppIcons.bici,
                       iconColor: colors.tertiary,
+                      label: bici,
                       showArrow: true,
-                      onTap: () {},
+                      onTap: onModo,
                     ),
 
                     const SizedBox(width: AppGap.related),
 
                     MapChip(
-                      icon: Icons.filter_alt_outlined,
+                      icon: AppIcons.filtros,
                       iconColor: filtrosActivos > 0 ? colors.primary : null,
                       label: filtrosActivos > 0
                           ? 'Filtros ($filtrosActivos)'

@@ -1,6 +1,5 @@
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
@@ -35,10 +34,10 @@ class MapaRutaState extends State<MapaRuta> {
   GoogleMapController? _controller;
 
   @override
-  void didUpdateWidget(MapaRuta anterior) {
-    super.didUpdateWidget(anterior);
+  void didUpdateWidget(MapaRuta oldWidget) {
+    super.didUpdateWidget(oldWidget);
     // llegó la ruta: se encuadra completa
-    if (!identical(anterior.puntos, widget.puntos) &&
+    if (!identical(oldWidget.puntos, widget.puntos) &&
         widget.puntos.isNotEmpty) {
       ajustar();
     }
