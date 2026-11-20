@@ -73,30 +73,44 @@ class _LoginScreenState extends State<LoginScreen> {
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(AppPadding.lg),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text('Cyclers', style: text.displaySmall, textAlign: TextAlign.center),
-              const SizedBox(height: AppGap.related),
-              Text(
-                'Inicia sesión para continuar',
-                style: text.bodyLarge?.copyWith(color: colors.onSurfaceVariant),
-                textAlign: TextAlign.center,
+          child: Center(
+            child: ConstrainedBox(
+              // en computador el login no se estira a todo el ancho
+              constraints: const BoxConstraints(maxWidth: 400),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    'Cyclers',
+                    style: text.displaySmall,
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: AppGap.related),
+                  Text(
+                    'Inicia sesión para continuar',
+                    style: text.bodyLarge?.copyWith(
+                      color: colors.onSurfaceVariant,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: AppGap.nav),
+                  FilledButton.icon(
+                    onPressed: _cargando ? null : _iniciarConGoogle,
+                    icon: _cargando
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.login),
+                    label: Text(
+                      _cargando ? 'Ingresando…' : 'Continuar con Google',
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: AppGap.nav),
-              FilledButton.icon(
-                onPressed: _cargando ? null : _iniciarConGoogle,
-                icon: _cargando
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.login),
-                label: Text(_cargando ? 'Ingresando…' : 'Continuar con Google'),
-              ),
-            ],
+            ),
           ),
         ),
       ),

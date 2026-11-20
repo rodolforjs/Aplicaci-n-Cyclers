@@ -27,6 +27,8 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  flutter_native_splash: ^2.4.6
+  flutter_launcher_icons: ^0.14.4
 
 flutter:
   uses-material-design: true
@@ -45,3 +47,26 @@ flutter:
       fonts:
         - asset: assets/fonts/DMSans-VariableFont_opsz,wght.ttf
           weight: 500
+
+# splash: fondo = brand500 del tema
+flutter_native_splash:
+  color: "#5E6D28"
+  image: assets/images/isotipo_splash.png
+  android_12:
+    color: "#5E6D28"
+    image: assets/images/isotipo_splash.png
+  web: true
+
+# ícono de la app (launcher)
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: assets/images/isotipo_icono.png
+  adaptive_icon_background: "#5E6D28"
+  adaptive_icon_foreground: assets/images/isotipo_foreground.png
+  min_sdk_android: 21
+  web:
+    generate: true
+    image_path: assets/images/isotipo_icono.png
+    background_color: "#5E6D28"
+    theme_color: "#5E6D28"

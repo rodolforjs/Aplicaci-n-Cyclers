@@ -20,6 +20,7 @@ import 'views/map_header.dart';
 import 'services/fotos_limite.dart';
 import 'services/places_service.dart';
 import 'views/place_card.dart';
+import 'views/perfil.dart';
 import 'views/pre_trip.dart';
 import 'views/save_route_sheet.dart';
 import 'views/search.dart';
@@ -78,7 +79,7 @@ class _HomeScreenState extends State<HomeScreen> {
           _Pending(label: 'Inicio'),
           RutasScreen(),
           _Pending(label: 'Social'),
-          _Pending(label: 'Perfil'),
+          PerfilView(),
         ],
       ),
 
