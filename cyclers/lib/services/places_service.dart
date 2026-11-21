@@ -58,6 +58,7 @@ class Lugar {
     final dificultad = ruta['dificultad'] as String?;
     // la primera foto subida por el usuario (si tiene) se muestra en la card
     final fotos = ruta['fotos'] as List?;
+    final conFotos = fotos != null && fotos.isNotEmpty;
     return Lugar(
       id: idDoc ?? 'ruta_${latitud}_$longitud',
       nombre: ruta['titulo'] as String? ?? 'Sin título',
@@ -70,7 +71,10 @@ class Lugar {
       posicion: LatLng(latitud, longitud),
       esRuta: true,
       idRuta: idDoc,
-      fotoUrl: fotos != null && fotos.isNotEmpty ? fotos.first as String : null,
+      fotoUrl: conFotos ? fotos!.first as String : null,
+      // si el usuario no subió fotos, se usa la de Google del lugar guardado
+      fotoNombre: conFotos ? null : ruta['fotoGoogle'] as String?,
+      fotoAutor: conFotos ? null : ruta['fotoAutor'] as String?,
     );
   }
 

@@ -16,6 +16,7 @@ import 'firebase_options.dart';
 import 'theme/app_icons.dart';
 import 'theme/theme.dart';
 import 'views/filters_sheet.dart';
+import 'views/inicio.dart';
 import 'views/map_header.dart';
 import 'services/fotos_limite.dart';
 import 'services/places_service.dart';
@@ -76,7 +77,7 @@ class _HomeScreenState extends State<HomeScreen> {
         index: _selectedIndex,
 
         children: const [
-          _Pending(label: 'Inicio'),
+          InicioView(),
           RutasScreen(),
           _Pending(label: 'Social'),
           PerfilView(),
@@ -414,6 +415,15 @@ class _RutasScreenState extends State<RutasScreen> {
     if (lugar == null) return;
     setState(() => _seleccion = lugar);
     _mapKey.currentState?.irA(lugar.posicion);
+    _fotoGoogle(lugar);
+  }
+
+  // guardado sin fotos propias: muestra la foto de Google del lugar
+  Future<void> _fotoGoogle(Lugar lugar) async {
+    if (lugar.fotoUrl != null || lugar.fotoNombre == null) return;
+    final conFoto = await LimiteFotos.aplicar(lugar);
+    if (!mounted || _seleccion?.idRuta != lugar.idRuta) return;
+    setState(() => _seleccion = conFoto);
   }
 
   // la card sigue los cambios de Firestore: lugar guardado pasa a ruta,
@@ -442,8 +452,14 @@ class _RutasScreenState extends State<RutasScreen> {
       return;
     }
 
-    final lugar = Lugar.deRuta(encontrada.data(), encontrada.id);
-    if (lugar != null) setState(() => _seleccion = lugar);
+    var lugar = Lugar.deRuta(encontrada.data(), encontrada.id);
+    if (lugar == null) return;
+    // si ya se veía la foto de Google, se mantiene
+    if (lugar.fotoUrl == null && actual.fotoUrl != null) {
+      lugar = lugar.conFoto(actual.fotoUrl!);
+    }
+    setState(() => _seleccion = lugar);
+    _fotoGoogle(lugar);
   }
 
   // la ruta guardada está en ese mismo punto
@@ -457,6 +473,12 @@ class _RutasScreenState extends State<RutasScreen> {
         (longitud - posicion.longitude).abs() < tolerancia;
   }
 
+  // se guarda la referencia a la foto de Google (no la imagen)
+  Map<String, dynamic> _datosFotoGoogle(Lugar lugar) => {
+    if (lugar.fotoNombre != null) 'fotoGoogle': lugar.fotoNombre,
+    if (lugar.fotoAutor != null) 'fotoAutor': lugar.fotoAutor,
+  };
+
   Future<void> _guardarSeleccion() async {
     final lugar = _seleccion;
     if (lugar == null) return;
@@ -467,6 +489,7 @@ class _RutasScreenState extends State<RutasScreen> {
       lugar.posicion,
       tituloInicial: esPuntoLibre ? '' : lugar.nombre,
       descripcionInicial: esPuntoLibre ? '' : lugar.direccion,
+      datosRuta: _datosFotoGoogle(lugar),
     );
     if (!guardada || !mounted) return;
 

@@ -185,6 +185,7 @@ class PerfilView extends StatelessWidget {
               );
             },
           ),
+
         ],
       ),
       ),

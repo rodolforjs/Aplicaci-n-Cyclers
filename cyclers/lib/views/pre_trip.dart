@@ -94,6 +94,9 @@ class _PreTripViewState extends State<PreTripView> {
       destino.posicion,
       tipo: kTipoRuta,
       datosRuta: {
+        // foto de Google del destino (se usa si no se suben fotos)
+        if (destino.fotoNombre != null) 'fotoGoogle': destino.fotoNombre,
+        if (destino.fotoAutor != null) 'fotoAutor': destino.fotoAutor,
         if (origen != null)
           'origen': {
             'latitud': origen.latitude,
